@@ -67,7 +67,6 @@ func (exp *Expect) SetTimeout(d time.Duration) {
 
 // GetBuffer returns a copy of the contents of a buffer
 func (exp *Expect) Buffer() string {
-	exp.drainReadChan()
 	return string(exp.buffer)
 }
 
@@ -155,7 +154,7 @@ func (exp *Expect) checkForMatch(pat *regexp.Regexp) (m Match, found bool) {
 }
 
 // Remove all the read events out of the
-func (exp *Expect) drainReadChan() {
+func (exp *Expect) DrainReadChan() {
 	done := false
 	for !done {
 		select {

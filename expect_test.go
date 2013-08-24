@@ -12,13 +12,15 @@ import (
 
 func assertSame(t *testing.T, a, b interface{}) {
 	if a != b {
-		t.Errorf("%#v == %#v assert failed", a, b)
+		t.Logf("%#v == %#v assert failed", a, b)
+		t.Fail()
 	}
 }
 
 func assertEq(t *testing.T, a, b interface{}) {
 	if !reflect.DeepEqual(a, b) {
-		t.Errorf("%#v == %#v assert failed", a, b)
+		t.Logf("%#v == %#v assert failed", a, b)
+		t.Fail()
 	}
 }
 
@@ -30,17 +32,20 @@ func TestTimeout(t *testing.T) {
 	exp := expect.Create(pty)
 
 	// This should timeout
-	t.Log("Test - should timeout")
+	t.Log("Expect - should timeout")
 	exp.SetTimeout(time.Millisecond)
 	m, err := exp.Expect("[Hh]ello")
+	t.Logf(" err=%#v", err)
 	assertSame(t, err, expect.ErrTimeout)
 	assertEq(t, m.Before, "")
 	assertEq(t, m.Groups, []string(nil))
 
 	// Try to get get the final text
 	t.Log("Test - should finish immediately")
+	t.Logf(" buffer[pre]:%#v", exp.Buffer())
 	exp.SetTimeout(time.Second)
 	m, err = exp.Expect("e(l+)o")
+	t.Logf(" m=%#v, err=%#v", m, err)
 	assertSame(t, err, nil)
 	assertEq(t, m, expect.Match{
 		Before: "h",
@@ -49,8 +54,9 @@ func TestTimeout(t *testing.T) {
 
 	// Test assert
 	t.Log("Test should return an EOF")
-	t.Logf(" Buffer: %#v", exp.Buffer())
+//	t.Logf(" Buffer: %#v", exp.Buffer())
 	err = exp.ExpectEOF()
+	t.Logf(" err=%#v", err)
 	assertSame(t, err, io.EOF)
 }
 
@@ -93,13 +99,18 @@ func TestLargeBuffer(t *testing.T) {
 
 	t.Log("Writing large amounts of text")
 	for i := 0; i < 1024; i++ {
-		t.Logf(" Writing %d bytes", i*len(text))
-		exp.Send(string(text))
+//		t.Logf(" Writing %d bytes", i*len(text))
+		err := exp.Send(string(text))
+		if err != nil {
+			t.Logf(" Send Error: %#v", err)
+		}
 	}
 	exp.Send("\nDONE\n")
 
 	t.Log("Expecting to see finish message")
-	_, err = exp.Expect("DONE")
+	match, err := exp.Expect("DONE")
+	t.Logf(" match.Groups=%#v", match.Groups)
+	t.Logf(" err=%#v", err)
 	assertSame(t, err, nil)
 
 }
