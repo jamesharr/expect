@@ -4,10 +4,12 @@ import (
 	"errors"
 	"github.com/kr/pty"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -244,7 +246,7 @@ func (exp *Expect) startReader() {
 		}
 
 		// Drain queue
-		for _,read := range queue {
+		for _, read := range queue {
 			exp.readChan <- read
 		}
 		queue = nil
@@ -257,6 +259,13 @@ func (exp *Expect) startReader() {
 			buf := make([]byte, READ_SIZE)
 			n, err := exp.pty.Read(buf)
 			buf = buf[0:n]
+
+			// OSX: Closed FD returns io.EOF
+			// Linux: Closed FD returns syscall.EIO, translate to io.EOF
+			pathErr, ok := err.(*os.PathError)
+			if ok && pathErr.Err == syscall.EIO {
+				err = io.EOF
+			}
 
 			queueInput <- readEvent{buf, err}
 

@@ -54,7 +54,7 @@ func TestTimeout(t *testing.T) {
 
 	// Test assert
 	t.Log("Test should return an EOF")
-//	t.Logf(" Buffer: %#v", exp.Buffer())
+	//	t.Logf(" Buffer: %#v", exp.Buffer())
 	err = exp.ExpectEOF()
 	t.Logf(" err=%#v", err)
 	assertSame(t, err, io.EOF)
@@ -99,7 +99,7 @@ func TestLargeBuffer(t *testing.T) {
 
 	t.Log("Writing large amounts of text")
 	for i := 0; i < 1024; i++ {
-//		t.Logf(" Writing %d bytes", i*len(text))
+		//		t.Logf(" Writing %d bytes", i*len(text))
 		err := exp.Send(string(text))
 		if err != nil {
 			t.Logf(" Send Error: %#v", err)
