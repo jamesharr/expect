@@ -51,7 +51,7 @@ func Create(pty *os.File) (exp *Expect) {
 	rv.timeout = time.Hour * 24 * 365
 	rv.buffer = make([]byte, 0, 0)
 	rv.readChan = make(chan readEvent)
-	go rv.readerGoRoutine()
+	go rv.startReader()
 	return &rv
 }
 
@@ -215,20 +215,58 @@ func (exp *Expect) send(arr []byte, masked bool) error {
 	return nil
 }
 
-func (exp *Expect) readerGoRoutine() {
-	done := false
-	for ! done {
-		buf := make([]byte, READ_SIZE)
-		n, err := exp.pty.Read(buf)
-		buf = buf[0:n]
+func (exp *Expect) startReader() {
+	queueInput := make(chan readEvent)
 
-		exp.readChan <- readEvent{buf, err}
-
-		if err != nil {
-			done = true
+	// Dynamic buffer channel shim
+	go func() {
+		queue := make([]readEvent, 0)
+		done := false
+		for !done {
+			if len(queue) > 0 {
+				select {
+				case exp.readChan <- queue[0]:
+					queue = queue[1:]
+				case read, ok := <-queueInput:
+					if ok {
+						queue = append(queue, read)
+					} else {
+						done = true
+					}
+				}
+			} else {
+				read, ok := <-queueInput
+				if ok {
+					queue = append(queue, read)
+				} else {
+					done = true
+				}
+			}
 		}
-	}
-	close(exp.readChan)
+
+		// Drain queue
+		for _,read := range queue {
+			exp.readChan <- read
+		}
+		queue = nil
+	}()
+
+	// Reader process
+	go func() {
+		done := false
+		for !done {
+			buf := make([]byte, READ_SIZE)
+			n, err := exp.pty.Read(buf)
+			buf = buf[0:n]
+
+			queueInput <- readEvent{buf, err}
+
+			if err != nil {
+				done = true
+			}
+		}
+		close(queueInput)
+	}()
 }
 
 // TODO -- register finalizer, do we even need this?

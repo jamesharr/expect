@@ -1,13 +1,13 @@
 package expect_test
 
 import (
+	"github.com/jamesharr/expect"
+	"github.com/kr/pty"
 	"io"
 	"os/exec"
 	"reflect"
 	"testing"
 	"time"
-	"github.com/jamesharr/expect"
-	"github.com/kr/pty"
 )
 
 func assertSame(t *testing.T, a, b interface{}) {
@@ -43,9 +43,9 @@ func TestTimeout(t *testing.T) {
 	m, err = exp.Expect("e(l+)o")
 	assertSame(t, err, nil)
 	assertEq(t, m, expect.Match{
-			Before: "h",
-			Groups: []string{"ello", "ll"},
-		})
+		Before: "h",
+		Groups: []string{"ello", "ll"},
+	})
 
 	// Test assert
 	t.Log("Test should return an EOF")
@@ -78,16 +78,13 @@ func TestSend(t *testing.T) {
 }
 
 func TestLargeBuffer(t *testing.T) {
-	// TODO - test fails.
-	// Not sure if it's worth it
-	return
-
 	// Start cat
 	exp, err := expect.Spawn("cat")
 	assertSame(t, err, nil)
 	exp.SetTimeout(time.Second)
 
 	// Sending large amounts of text
+	t.Log("Generating large amounts of text")
 	text := make([]byte, 128)
 	for i := range text {
 		text[i] = '.'
@@ -99,5 +96,10 @@ func TestLargeBuffer(t *testing.T) {
 		t.Logf(" Writing %d bytes", i*len(text))
 		exp.Send(string(text))
 	}
+	exp.Send("\nDONE\n")
+
+	t.Log("Expecting to see finish message")
+	_, err = exp.Expect("DONE")
+	assertSame(t, err, nil)
 
 }
