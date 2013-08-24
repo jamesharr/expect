@@ -3,7 +3,7 @@ package expect
 import (
 	"errors"
 	"github.com/kr/pty"
-	"os"
+	"io"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -13,7 +13,7 @@ import (
 
 type Expect struct {
 	timeout time.Duration
-	pty     *os.File
+	pty     io.ReadWriteCloser
 	buffer  []byte
 
 	readChan   chan readEvent
@@ -45,7 +45,7 @@ func Spawn(name string, args ...string) (*Expect, error) {
 }
 
 // Create an Expect instance from something that we can do read/writes off of.
-func Create(pty *os.File) (exp *Expect) {
+func Create(pty io.ReadWriteCloser) (exp *Expect) {
 	rv := Expect{}
 	rv.pty = pty
 	rv.timeout = time.Hour * 24 * 365
