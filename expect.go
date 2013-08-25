@@ -2,6 +2,7 @@ package expect
 
 import (
 	"errors"
+	"github.com/jamesharr/eventbus"
 	"github.com/kr/pty"
 	"io"
 	"os"
@@ -20,6 +21,8 @@ type Expect struct {
 
 	readChan   chan readEvent
 	readStatus error
+
+	eventbus *eventbus.EventBus
 }
 
 type Match struct {
@@ -53,6 +56,7 @@ func Create(pty io.ReadWriteCloser) (exp *Expect) {
 	rv.timeout = time.Hour * 24 * 365
 	rv.buffer = make([]byte, 0, 0)
 	rv.readChan = make(chan readEvent)
+	rv.eventbus = eventbus.CreateEventBus()
 	go rv.startReader()
 	return &rv
 }
@@ -96,7 +100,10 @@ func (exp *Expect) SendLn(lines ...string) error {
 
 // ExpectRegexp searches the I/O read stream for a pattern within .Timeout()
 func (exp *Expect) ExpectRegexp(pat *regexp.Regexp) (Match, error) {
+	exp.eventbus.Emit(&ObsExpectCall{pat, exp.timeout})
+
 	if exp.readStatus != nil {
+		exp.eventbus.Emit(&ObsExpectReturn{Match{}, exp.readStatus})
 		return Match{}, exp.readStatus
 	}
 
@@ -104,23 +111,26 @@ func (exp *Expect) ExpectRegexp(pat *regexp.Regexp) (Match, error) {
 
 	for first := true; first || time.Now().Before(giveUpTime); first = false {
 
+		// Read some data
 		if !first {
 			exp.drainOnceTimeout(giveUpTime)
 		}
 
-		// Check for a match or error
+		// Check for a match
 		if m, found := exp.checkForMatch(pat); found {
+			exp.eventbus.Emit(&ObsExpectReturn{m, nil})
 			return m, nil
-		} else {
 		}
 
 		// No match, see if we have an error (Most common - io.EOF)
 		if exp.readStatus != nil {
+			exp.eventbus.Emit(&ObsExpectReturn{Match{}, exp.readStatus})
 			return Match{}, exp.readStatus
 		}
 	}
 
 	// Time is up.
+	exp.eventbus.Emit(&ObsExpectReturn{Match{}, ErrTimeout})
 	return Match{}, ErrTimeout
 }
 
@@ -130,8 +140,12 @@ func (exp *Expect) Expect(expr string) (m Match, err error) {
 }
 
 func (exp *Expect) ExpectEOF() error {
-	_, err := exp.Expect("$a")
+	_, err := exp.Expect("$EOF")
 	return err
+}
+
+func (exp *Expect) AddObserver(observer chan eventbus.Message) {
+	exp.eventbus.Register(observer)
 }
 
 func (exp *Expect) checkForMatch(pat *regexp.Regexp) (m Match, found bool) {
@@ -191,6 +205,14 @@ func (exp *Expect) mergeRead(read readEvent) {
 	exp.buffer = append(exp.buffer, read.buf...)
 	exp.readStatus = read.status
 	exp.fixNewLines()
+
+	// Observation events
+	if len(read.buf) > 0 {
+		exp.eventbus.Emit(&ObsRecv{read.buf})
+	}
+	if read.status == io.EOF {
+		exp.eventbus.Emit(&ObsEOF{})
+	}
 }
 
 var newLineRegexp *regexp.Regexp
@@ -205,9 +227,9 @@ func (exp *Expect) fixNewLines() {
 }
 
 func (exp *Expect) send(arr []byte, masked bool) error {
-	// TODO observers
 	for len(arr) > 0 {
 		if n, err := exp.pty.Write(arr); err == nil {
+			exp.eventbus.Emit(&ObsSend{arr[0:n], masked})
 			arr = arr[n:]
 		} else {
 			return err
