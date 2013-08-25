@@ -1,34 +1,20 @@
 package expect_test
 
 import (
+	"github.com/bmizerany/assert"
 	"github.com/jamesharr/expect"
 	"github.com/kr/pty"
 	"io"
 	"os/exec"
-	"reflect"
 	"testing"
 	"time"
 )
 
-func assertSame(t *testing.T, a, b interface{}) {
-	if a != b {
-		t.Logf("%#v == %#v assert failed", a, b)
-		t.Fail()
-	}
-}
-
-func assertEq(t *testing.T, a, b interface{}) {
-	if !reflect.DeepEqual(a, b) {
-		t.Logf("%#v == %#v assert failed", a, b)
-		t.Fail()
-	}
-}
-
-func TestTimeout(t *testing.T) {
+func TestExpect_timeout(t *testing.T) {
 	// Start basic
 	t.Log("Starting Command")
 	pty, err := pty.Start(exec.Command("bash", "-c", "sleep 0.1; echo hello"))
-	assertSame(t, err, nil)
+	assert.Equal(t, nil, err)
 	exp := expect.Create(pty)
 
 	// This should timeout
@@ -36,9 +22,9 @@ func TestTimeout(t *testing.T) {
 	exp.SetTimeout(time.Millisecond)
 	m, err := exp.Expect("[Hh]ello")
 	t.Logf(" err=%#v", err)
-	assertSame(t, err, expect.ErrTimeout)
-	assertEq(t, m.Before, "")
-	assertEq(t, m.Groups, []string(nil))
+	assert.Equal(t, expect.ErrTimeout, err)
+	assert.Equal(t, "", m.Before)
+	assert.Equal(t, []string(nil), m.Groups)
 
 	// Try to get get the final text
 	t.Log("Test - should finish immediately")
@@ -46,47 +32,47 @@ func TestTimeout(t *testing.T) {
 	exp.SetTimeout(time.Second)
 	m, err = exp.Expect("e(l+)o")
 	t.Logf(" m=%#v, err=%#v", m, err)
-	assertSame(t, err, nil)
-	assertEq(t, m, expect.Match{
+	assert.Equal(t, nil, err)
+	assert.Equal(t, expect.Match{
 		Before: "h",
 		Groups: []string{"ello", "ll"},
-	})
+	}, m)
 
 	// Test assert
 	t.Log("Test should return an EOF")
 	//	t.Logf(" Buffer: %#v", exp.Buffer())
 	err = exp.ExpectEOF()
 	t.Logf(" err=%#v", err)
-	assertSame(t, err, io.EOF)
+	assert.Equal(t, io.EOF, err)
 }
 
-func TestSend(t *testing.T) {
+func TestExpect_send(t *testing.T) {
 	// Start cat
 	exp, err := expect.Spawn("cat")
-	assertSame(t, err, nil)
+	assert.Equal(t, nil, err)
 	exp.SetTimeout(time.Second)
 
 	// Send some data
 	err = exp.Send("Hello\nWorld\n")
-	assertSame(t, err, nil)
+	assert.Equal(t, nil, err)
 
 	// Get first chunk
 	m, err := exp.Expect("Hello")
-	assertSame(t, err, nil)
-	assertEq(t, m.Before, "")
-	assertEq(t, m.Groups, []string{"Hello"})
+	assert.Equal(t, nil, err)
+	assert.Equal(t, "", m.Before)
+	assert.Equal(t, []string{"Hello"}, m.Groups)
 
 	// Check new lines
 	m, err = exp.Expect("World\n")
-	assertSame(t, err, nil)
-	assertEq(t, m.Before, "\n")
-	assertEq(t, m.Groups, []string{"World\n"})
+	assert.Equal(t, nil, err)
+	assert.Equal(t, "\n", m.Before)
+	assert.Equal(t, []string{"World\n"}, m.Groups)
 }
 
-func TestLargeBuffer(t *testing.T) {
+func TestExpect_largeBuffer(t *testing.T) {
 	// Start cat
 	exp, err := expect.Spawn("cat")
-	assertSame(t, err, nil)
+	assert.Equal(t, nil, err)
 	exp.SetTimeout(time.Second)
 
 	// Sending large amounts of text
@@ -111,6 +97,6 @@ func TestLargeBuffer(t *testing.T) {
 	match, err := exp.Expect("DONE")
 	t.Logf(" match.Groups=%#v", match.Groups)
 	t.Logf(" err=%#v", err)
-	assertSame(t, err, nil)
+	assert.Equal(t, nil, err)
 
 }

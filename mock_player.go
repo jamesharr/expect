@@ -1,5 +1,7 @@
 package expect
 
+import "io"
+
 type MockPlayer struct {
 	CheckWrites      bool
 	TimingMultiplier float32
@@ -7,12 +9,12 @@ type MockPlayer struct {
 
 func (player *MockPlayer) Read(p []byte) (n int, err error) {
 	// TODO
-	return 0, nil
+	return 0, io.EOF
 }
 
 func (player *MockPlayer) Write(p []byte) (n int, err error) {
 	// TODO
-	return 0, nil
+	return len(p), nil
 }
 
 func (player *MockPlayer) Close() error {

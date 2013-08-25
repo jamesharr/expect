@@ -1,9 +1,11 @@
 package expect
 
+import "github.com/jamesharr/eventbus"
+
 type MockRecorder struct {
 }
 
-func (recorder *MockRecorder) GetObservationChannel() chan interface{} {
+func (recorder *MockRecorder) GetObservationChannel() chan eventbus.Message {
 	return nil
 }
 
