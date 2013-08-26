@@ -1,9 +1,9 @@
 language: go
 
-go:
-  - 1.0
-  - 1.1
-  - tip
+before_script: go get github.com/bmizerany/assert
 
-install:
-  - go get github.com/jamesharr/expect
+go:
+  #- 1.0
+  - 1.1
+  #- tip
+
