@@ -4,6 +4,7 @@ import (
 	"github.com/bmizerany/assert"
 	"github.com/jamesharr/expect"
 	"io"
+	"io/ioutil"
 	"testing"
 	"time"
 )
@@ -28,15 +29,15 @@ func simpleEchoTest(t *testing.T, exp *expect.Expect) {
 }
 
 func TestMocker(t *testing.T) {
-	t.Log("Set up mock_recorder")
-	mock_recorder := expect.CreateMockRecorder()
+	t.Log("Set up Mocker()")
+	mocker := expect.CreateMocker()
 
 	t.Log("Set up real expect process")
-	exp, err := expect.Spawn("sh", "-c", "read line; echo $line")
+	exp, err := expect.Spawn("sh", "-c", "read -s line; echo $line")
 	assert.Equal(t, nil, err)
 
 	t.Log("Enable recording on expect")
-	exp.AddObserver(mock_recorder.GetObservationChannel())
+	exp.AddObserver(mocker.GetObservationChannel())
 
 	t.Log("Running simpleEchoTest on real program")
 	simpleEchoTest(t, exp)
@@ -44,19 +45,21 @@ func TestMocker(t *testing.T) {
 	t.Log("")
 
 	// Get mocker data
-	mock_config := mock_recorder.GetMockData()
+	tcl_script := mocker.GetTCLExpectScript()
+	t.Log("Expect Script:\n", tcl_script)
+	f, err := ioutil.TempFile("", "mocker_test_tmpscript")
+	assert.Equal(t, nil, err)
 
-	// Re-setup expect with mocker
-	t.Log("Set up mock_player")
-	mock_player := expect.CreateMockPlayer(mock_config)
-	mock_player.CheckWrites = true
-	mock_player.TimingMultiplier = 0.1
+	tcl_script_filename := f.Name()
+	f.WriteString(tcl_script)
+	f.Close()
 
 	// Create expect
-	t.Log("Set up expect process with fake mock player")
-	exp = expect.Create(mock_player)
+	t.Log("Running simpleEchoTest with Mocked TCLScript")
+	exp, err = expect.Spawn("expect", "-f", tcl_script_filename)
+	assert.Equal(t, nil, err)
 
-	t.Log("Running simpleEchoTest on mock_player")
+	t.Log("Running test")
 	simpleEchoTest(t, exp)
 	t.Log("Done")
 	t.Log("")
