@@ -13,13 +13,21 @@ func simpleEchoTest(t *testing.T, exp *expect.Expect) {
 	exp.SetTimeout(1 * time.Second)
 
 	// Send data
-	exp.SendLn("Hello\n")
+	exp.SendLn("Hello")
 
-	// Receive it back
+	// Receive the term echo
 	m, err := exp.Expect("[Hh]ello")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, expect.Match{
 		Before: "",
+		Groups: []string{"Hello"},
+	}, m)
+
+	// Receive the real echo
+	m, err = exp.Expect("[Hh]ello")
+	assert.Equal(t, nil, err)
+	assert.Equal(t, expect.Match{
+		Before: "\n",
 		Groups: []string{"Hello"},
 	}, m)
 
@@ -33,7 +41,7 @@ func TestMocker(t *testing.T) {
 	mocker := expect.CreateMocker()
 
 	t.Log("Set up real expect process")
-	exp, err := expect.Spawn("sh", "-c", "read -s line; echo $line")
+	exp, err := expect.Spawn("sh", "-c", "read line; echo $line")
 	assert.Equal(t, nil, err)
 
 	t.Log("Enable recording on expect")
