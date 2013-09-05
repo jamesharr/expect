@@ -245,20 +245,26 @@ func (exp *Expect) startReader() {
 	go func() {
 		queue := make([]readEvent, 0)
 		done := false
+
+		// These are left as variables to handle the len(queue)=0 case.
+		var sendItem readEvent
+		var sendChan chan readEvent = nil
+
 		for !done {
+
+			// Set up queue & send operation, otherwise let select block on nil-channel.
 			if len(queue) > 0 {
-				select {
-				case exp.readChan <- queue[0]:
-					queue = queue[1:]
-				case read, ok := <-queueInput:
-					if ok {
-						queue = append(queue, read)
-					} else {
-						done = true
-					}
-				}
+				sendItem = queue[0]
+				sendChan = exp.readChan
 			} else {
-				read, ok := <-queueInput
+				sendChan = nil
+			}
+
+			// Wait for which ever I/O event happens first
+			select {
+			case sendChan <- sendItem:
+				queue = queue[1:]
+			case read, ok := <-queueInput:
 				if ok {
 					queue = append(queue, read)
 				} else {
