@@ -93,7 +93,7 @@ func appendToOps(ops []mockOp, msg eventbus.Message, lastOp *time.Time) []mockOp
 	return ops
 }
 
-func (mocker *Mocker) GetObservationChannel() chan eventbus.Message {
+func (mocker *Mocker) ObservationChannel() chan eventbus.Message {
 	return mocker.observerChan
 }
 
@@ -105,7 +105,7 @@ func (mocker *Mocker) getOps() []mockOp {
 	return mocker.results
 }
 
-func (mocker *Mocker) GetTCLExpectScript() string {
+func (mocker *Mocker) TCLExpectScript() string {
 	ops := mocker.getOps()
 
 	script := make([]string, 0, len(ops)+1)

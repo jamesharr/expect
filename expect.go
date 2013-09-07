@@ -23,6 +23,8 @@ type Expect struct {
 	readStatus error
 
 	eventbus *eventbus.EventBus
+
+	closed bool
 }
 
 type Match struct {
@@ -71,21 +73,34 @@ func (exp *Expect) SetTimeout(d time.Duration) {
 	exp.timeout = d
 }
 
-// GetBuffer returns a copy of the contents of a buffer
+// Buffer returns a copy of the contents of a buffer
 func (exp *Expect) Buffer() string {
 	return string(exp.buffer)
 }
 
 // Close will end the expect session and return any error associated with the close
 func (exp *Expect) Close() error {
+	if exp.closed {
+		return nil
+	}
+
 	// Remove any finalizer associated with exp
 	runtime.SetFinalizer(exp, nil)
+
+	// Close up shop
+	exp.closed = true
+	exp.eventbus.Close()
 	return exp.pty.Close()
 }
 
 // Send data to program
 func (exp *Expect) Send(s string) error {
 	return exp.send([]byte(s), false)
+}
+
+// Send data, but mark it as masked to observers. Use this for passwords
+func (exp *Expect) SendMasked(s string) error {
+	return exp.send([]byte(s), true)
 }
 
 // Send several lines data (separated by \n) to the process
@@ -139,13 +154,27 @@ func (exp *Expect) Expect(expr string) (m Match, err error) {
 	return exp.ExpectRegexp(regexp.MustCompile(expr))
 }
 
+// Wait for EOF
 func (exp *Expect) ExpectEOF() error {
 	_, err := exp.Expect("$EOF")
 	return err
 }
 
+// Add an observer to the expect process.
+//
+// Observers get a copy of various I/O and API events.
+//
+// Note: observation channel is not closed when this
 func (exp *Expect) AddObserver(observer chan eventbus.Message) {
 	exp.eventbus.Register(observer)
+}
+
+// Remove an observer from the the expect process.
+//
+// This also closes the observer
+func (exp *Expect) RemoveObserver(observer chan eventbus.Message) {
+	exp.eventbus.Unregister(observer)
+	close(observer)
 }
 
 func (exp *Expect) checkForMatch(pat *regexp.Regexp) (m Match, found bool) {
@@ -210,6 +239,7 @@ func (exp *Expect) mergeRead(read readEvent) {
 	if len(read.buf) > 0 {
 		exp.eventbus.Emit(&ObsRecv{read.buf})
 	}
+
 	if read.status == io.EOF {
 		exp.eventbus.Emit(&ObsEOF{})
 	}

@@ -45,7 +45,7 @@ func TestMocker(t *testing.T) {
 	assert.Equal(t, nil, err)
 
 	t.Log("Enable recording on expect")
-	exp.AddObserver(mocker.GetObservationChannel())
+	exp.AddObserver(mocker.ObservationChannel())
 
 	t.Log("Running simpleEchoTest on real program")
 	simpleEchoTest(t, exp)
@@ -53,7 +53,7 @@ func TestMocker(t *testing.T) {
 	t.Log("")
 
 	// Get mocker data
-	tcl_script := mocker.GetTCLExpectScript()
+	tcl_script := mocker.TCLExpectScript()
 	t.Log("Expect Script:\n", tcl_script)
 	f, err := ioutil.TempFile("", "mocker_test_tmpscript")
 	assert.Equal(t, nil, err)
