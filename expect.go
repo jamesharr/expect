@@ -305,6 +305,8 @@ func (exp *Expect) startReader() {
 
 		// Drain queue
 		for _, read := range queue {
+			// TODO - this hangs if the user exp.Close()s with data left to read.
+			// exp.Close() should signal to us that there's no more listeners left.
 			exp.readChan <- read
 		}
 		queue = nil
