@@ -1,58 +1,34 @@
 package expect
 
 import (
-	"github.com/jamesharr/eventbus"
-	"log"
-	"os"
+	"regexp"
+	"time"
 )
 
-// Simple logger for events.
-//
-// This should probably be refactored once we figure out what a useful API is.
-func LoggingObserver(filename string) chan eventbus.Message {
-	ch := make(chan eventbus.Message)
-	go observer(filename, ch)
-	return ch
-}
+type Logger interface {
 
-func observer(filename string, ch chan eventbus.Message) {
+	// API user sent an item
+	Send(time.Time, []byte)
 
-	f, err := os.Create(filename)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
+	// API user sent a masked item. The masked data is included, but the API user is advised to
+	// not log this data in production.
+	SendMasked(time.Time, []byte)
 
-	logger := log.New(f, "[expect] ", log.LstdFlags)
+	// Data is received by the same goroutine as the API user.
+	Recv(time.Time, []byte)
 
-	for {
-		msg, ok := <-ch
-		if !ok {
-			logger.Println("***Observation channel closed***")
-			break
-		}
+	// Data is received off the network
+	RecvNet(time.Time, []byte)
 
-		switch observation := msg.(type) {
-		case *ObsSend:
-			if observation.Masked {
-				logger.Print("{SEND ***MASKED***}")
-			} else {
-				logger.Printf("{SEND %#v}", string(observation.Data))
-			}
-		case *ObsRecv:
-			logger.Print(string(observation.Data))
-		case *ObsEOF:
-			logger.Println("***EOF***")
-		case *ObsExpectCall:
-			logger.Printf("{Expect %v}", observation.Regexp)
-		case *ObsExpectReturn:
-			if observation.Error != nil {
-				logger.Printf("{ExpectError %v}", observation.Error)
-			} else {
-				logger.Printf("{ExpectMatch %v}", observation.Match)
-			}
-		default:
-			logger.Println("Unknown observation")
-		}
-	}
+	// EOF has been reached. Time is when the EOF was received off the network
+	RecvEOF(time.Time)
+
+	// API user ran some form of Expect* call
+	ExpectCall(time.Time, *regexp.Regexp)
+
+	// API user got a return back from an Expect* call
+	ExpectReturn(time.Time, Match, error)
+
+	// Close the log file / this is the last item
+	Close(time.Time)
 }

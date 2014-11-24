@@ -1,30 +1,42 @@
 package expect_test
 
 import (
-	"github.com/bmizerany/assert"
-	"github.com/jamesharr/expect"
-	"github.com/kr/pty"
 	"io"
 	"os/exec"
 	"testing"
 	"time"
+
+	"reflect"
+	"github.com/jamesharr/expect"
+	"github.com/kr/pty"
 )
 
 func TestExpect_timeout(t *testing.T) {
 	// Start basic
 	t.Log("Starting Command")
-	pty, err := pty.Start(exec.Command("bash", "-c", "sleep 0.1; echo hello"))
-	assert.Equal(t, nil, err)
-	exp := expect.Create(pty)
+	cmd := exec.Command("bash", "-c", "sleep 0.1; echo hello")
+	p, err := pty.Start(cmd)
+	if err != nil {
+		t.Error("Start failed:", err)
+	}
+	exp := expect.Create(p, func() {})
+	defer exp.Close()
+	exp.SetLogger(expect.TestLogger(t))
 
 	// This should timeout
 	t.Log("Expect - should timeout")
 	exp.SetTimeout(time.Millisecond)
 	m, err := exp.Expect("[Hh]ello")
 	t.Logf(" err=%#v", err)
-	assert.Equal(t, expect.ErrTimeout, err)
-	assert.Equal(t, "", m.Before)
-	assert.Equal(t, []string(nil), m.Groups)
+	if err != expect.ErrTimeout {
+		t.Error("Expecting timeout, but got", err)
+	}
+	if m.Before != "" {
+		t.Errorf("m.Before should be empty, but got %q", m.Before)
+	}
+	if !reflect.DeepEqual(m.Groups, []string(nil)) {
+		t.Errorf("Expecting m.Groups to be empty, got %q", m.Groups)
+	}
 
 	// Try to get get the final text
 	t.Log("Test - should finish immediately")
@@ -32,47 +44,75 @@ func TestExpect_timeout(t *testing.T) {
 	exp.SetTimeout(time.Second)
 	m, err = exp.Expect("e(l+)o")
 	t.Logf(" m=%#v, err=%#v", m, err)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, expect.Match{
+	if err != nil {
+		t.Error("Expecting error to be nil, but got", err)
+	}
+	m_exp := expect.Match{
 		Before: "h",
 		Groups: []string{"ello", "ll"},
-	}, m)
+	}
+	if !reflect.DeepEqual(m, m_exp) {
+		t.Errorf("Expecting match to be %v, but got %v", m, m_exp)
+	}
 
 	// Test assert
 	t.Log("Test should return an EOF")
 	//	t.Logf(" Buffer: %#v", exp.Buffer())
 	err = exp.ExpectEOF()
 	t.Logf(" err=%#v", err)
-	assert.Equal(t, io.EOF, err)
+	if err != io.EOF {
+		t.Error("Expecting EOF error, got", err)
+	}
 }
 
 func TestExpect_send(t *testing.T) {
 	// Start cat
 	exp, err := expect.Spawn("cat")
-	assert.Equal(t, nil, err)
+	if err != nil {
+		t.Error("Unexpected error spawning 'cat'", err)
+	}
+	defer exp.Close()
+	exp.SetLogger(expect.TestLogger(t))
 	exp.SetTimeout(time.Second)
 
 	// Send some data
 	err = exp.Send("Hello\nWorld\n")
-	assert.Equal(t, nil, err)
+	if err != nil {
+		t.Error("Unexpected error spawning 'cat'", err)
+	}
 
 	// Get first chunk
 	m, err := exp.Expect("Hello")
-	assert.Equal(t, nil, err)
-	assert.Equal(t, "", m.Before)
-	assert.Equal(t, []string{"Hello"}, m.Groups)
+	if err != nil {
+		t.Error("Expect() error:", err)
+	}
+	m_exp := expect.Match{
+		Before: "",
+		Groups: []string{"Hello"},
+	}
+	if !reflect.DeepEqual(m, m_exp) {
+		t.Errorf("expected match to be %v, got %v", m_exp, m)
+	}
 
 	// Check new lines
 	m, err = exp.Expect("World\n")
-	assert.Equal(t, nil, err)
-	assert.Equal(t, "\n", m.Before)
-	assert.Equal(t, []string{"World\n"}, m.Groups)
+	m_exp = expect.Match{
+		Before: "\n",
+		Groups: []string{"World\n"},
+	}
+	if !reflect.DeepEqual(m, m_exp) {
+		t.Errorf("expected match to be %v, got %v", m_exp, m)
+	}
 }
 
 func TestExpect_largeBuffer(t *testing.T) {
 	// Start cat
 	exp, err := expect.Spawn("cat")
-	assert.Equal(t, nil, err)
+	if err != nil {
+		t.Error("Unexpected error spawning 'cat'", err)
+	}
+	defer exp.Close()
+	exp.SetLogger(expect.TestLogger(t))
 	exp.SetTimeout(time.Second)
 
 	// Sending large amounts of text
@@ -97,6 +137,8 @@ func TestExpect_largeBuffer(t *testing.T) {
 	match, err := exp.Expect("DONE")
 	t.Logf(" match.Groups=%#v", match.Groups)
 	t.Logf(" err=%#v", err)
-	assert.Equal(t, nil, err)
+	if err != nil {
+		t.Error("Unexpected err", err)
+	}
 
 }

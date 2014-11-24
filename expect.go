@@ -2,31 +2,33 @@ package expect
 
 import (
 	"errors"
-	"github.com/jamesharr/eventbus"
-	"github.com/kr/pty"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/kr/pty"
 )
 
+// Expect is a program interaction session.
 type Expect struct {
 	timeout time.Duration
 	pty     io.ReadWriteCloser
+	killer  func()
 	buffer  []byte
 
+	// channel for receiving read events
 	readChan   chan readEvent
 	readStatus error
 
-	eventbus *eventbus.EventBus
-
-	closed bool
+	// Logging helper
+	log *logManager
 }
 
+// Match is returned from exp.Expect*() when a match is found.
 type Match struct {
 	Before string
 	Groups []string
@@ -37,29 +39,43 @@ type readEvent struct {
 	status error
 }
 
+// ErrTimeout is returned from exp.Expect*() when a timeout is reached.
 var ErrTimeout = errors.New("Expect Timeout")
 
+// READ_SIZE is the largest amount of data expect attempts to read in a single I/O operation.
+// This likely needs some research and tuning.
 const READ_SIZE = 4094
 
 // Create an Expect instance from a command.
 // Effectively the same as Create(pty.Start(exec.Command(name, args...)))
 func Spawn(name string, args ...string) (*Expect, error) {
-	pty, err := pty.Start(exec.Command(name, args...))
+	cmd := exec.Command(name, args...)
+	pty, err := pty.Start(cmd)
 	if err != nil {
 		return nil, err
 	}
-	return Create(pty), nil
+	killer := func() {
+		cmd.Process.Kill()
+	}
+	return Create(pty, killer), nil
 }
 
 // Create an Expect instance from something that we can do read/writes off of.
-func Create(pty io.ReadWriteCloser) (exp *Expect) {
-	rv := Expect{}
-	rv.pty = pty
-	rv.timeout = time.Hour * 24 * 365
-	rv.buffer = make([]byte, 0, 0)
-	rv.readChan = make(chan readEvent)
-	rv.eventbus = eventbus.CreateEventBus()
-	go rv.startReader()
+//
+// Note: Close() must be called to cleanup this process.
+func Create(pty io.ReadWriteCloser, killer func()) (exp *Expect) {
+	rv := Expect{
+		timeout:  time.Hour * 24 * 365,
+		pty:      pty,
+		readChan: make(chan readEvent),
+		log:      createLogManager(),
+		killer:   killer,
+	}
+
+	// Start up processes
+	rv.startReader()
+
+	// Done
 	return &rv
 }
 
@@ -73,24 +89,24 @@ func (exp *Expect) SetTimeout(d time.Duration) {
 	exp.timeout = d
 }
 
-// Buffer returns a copy of the contents of a buffer
-func (exp *Expect) Buffer() string {
-	return string(exp.buffer)
+// Return the current buffer.
+//
+// Note: This is not all data received off the network, but data that has been received for processing.
+func (exp *Expect) Buffer() []byte {
+	return exp.buffer
 }
 
-// Close will end the expect session and return any error associated with the close
+// Kill & close off process.
+//
+// Note: This *must* be run to cleanup the process
 func (exp *Expect) Close() error {
-	if exp.closed {
-		return nil
+	exp.killer()
+	err := exp.pty.Close()
+	for readEvent := range exp.readChan {
+		exp.mergeRead(readEvent)
 	}
-
-	// Remove any finalizer associated with exp
-	runtime.SetFinalizer(exp, nil)
-
-	// Close up shop
-	exp.closed = true
-	exp.eventbus.Close()
-	return exp.pty.Close()
+	exp.log.Close()
+	return err
 }
 
 // Send data to program
@@ -113,68 +129,58 @@ func (exp *Expect) SendLn(lines ...string) error {
 	return nil
 }
 
+func (exp *Expect) send(arr []byte, masked bool) error {
+	for len(arr) > 0 {
+		if n, err := exp.pty.Write(arr); err == nil {
+			if masked {
+				exp.log.SendMasked(arr[0:n])
+			} else {
+				exp.log.Send(arr[0:n])
+			}
+			arr = arr[n:]
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
 // ExpectRegexp searches the I/O read stream for a pattern within .Timeout()
 func (exp *Expect) ExpectRegexp(pat *regexp.Regexp) (Match, error) {
-	exp.eventbus.Emit(&ObsExpectCall{pat, exp.timeout})
+	exp.log.ExpectCall(pat)
 
+	// Read error happened.
 	if exp.readStatus != nil {
-		exp.eventbus.Emit(&ObsExpectReturn{Match{}, exp.readStatus})
+		exp.log.ExpectReturn(Match{}, exp.readStatus)
 		return Match{}, exp.readStatus
 	}
 
+	// Calculate absolute timeout
 	giveUpTime := time.Now().Add(exp.timeout)
 
+	// Loop until we match or read some data
 	for first := true; first || time.Now().Before(giveUpTime); first = false {
-
 		// Read some data
 		if !first {
-			exp.drainOnceTimeout(giveUpTime)
+			exp.readData(giveUpTime)
 		}
 
-		// Check for a match
+		// Check for match
 		if m, found := exp.checkForMatch(pat); found {
-			exp.eventbus.Emit(&ObsExpectReturn{m, nil})
+			exp.log.ExpectReturn(m, nil)
 			return m, nil
 		}
 
-		// No match, see if we have an error (Most common - io.EOF)
+		// If no match, check for read error (likely io.EOF)
 		if exp.readStatus != nil {
-			exp.eventbus.Emit(&ObsExpectReturn{Match{}, exp.readStatus})
+			exp.log.ExpectReturn(Match{}, exp.readStatus)
 			return Match{}, exp.readStatus
 		}
 	}
 
-	// Time is up.
-	exp.eventbus.Emit(&ObsExpectReturn{Match{}, ErrTimeout})
+	// Time is up
+	exp.log.ExpectReturn(Match{}, ErrTimeout)
 	return Match{}, ErrTimeout
-}
-
-// Expect(s string) is equivalent to exp.ExpectRegexp(regexp.MustCompile(s))
-func (exp *Expect) Expect(expr string) (m Match, err error) {
-	return exp.ExpectRegexp(regexp.MustCompile(expr))
-}
-
-// Wait for EOF
-func (exp *Expect) ExpectEOF() error {
-	_, err := exp.Expect("$EOF")
-	return err
-}
-
-// Add an observer to the expect process.
-//
-// Observers get a copy of various I/O and API events.
-//
-// Note: observation channel is not closed when this
-func (exp *Expect) AddObserver(observer chan eventbus.Message) {
-	exp.eventbus.Register(observer)
-}
-
-// Remove an observer from the the expect process.
-//
-// This also closes the observer
-func (exp *Expect) RemoveObserver(observer chan eventbus.Message) {
-	exp.eventbus.Unregister(observer)
-	close(observer)
 }
 
 func (exp *Expect) checkForMatch(pat *regexp.Regexp) (m Match, found bool) {
@@ -198,35 +204,16 @@ func (exp *Expect) checkForMatch(pat *regexp.Regexp) (m Match, found bool) {
 	return
 }
 
-// Remove all the read events out of the
-func (exp *Expect) DrainReadChan() {
-	done := false
-	for !done {
-		select {
-		case read, ok := <-exp.readChan:
-			// Got some data, merge it
-			if ok {
-				exp.mergeRead(read)
-			}
-
-		default:
-			// Nothing available, just return
-			done = true
-		}
-	}
-}
-
-func (exp *Expect) drainOnceTimeout(giveUpTime time.Time) {
+func (exp *Expect) readData(giveUpTime time.Time) {
 	wait := giveUpTime.Sub(time.Now())
 	select {
 	case read, ok := <-exp.readChan:
-		// Got some data, merge it once.
 		if ok {
 			exp.mergeRead(read)
 		}
 
 	case <-time.After(wait):
-		// Timeout, return
+		// Timeout & return
 	}
 }
 
@@ -235,20 +222,19 @@ func (exp *Expect) mergeRead(read readEvent) {
 	exp.readStatus = read.status
 	exp.fixNewLines()
 
-	// Observation events
 	if len(read.buf) > 0 {
-		exp.eventbus.Emit(&ObsRecv{read.buf})
+		exp.log.Recv(read.buf)
 	}
 
 	if read.status == io.EOF {
-		exp.eventbus.Emit(&ObsEOF{})
+		exp.log.RecvEOF()
 	}
 }
 
 var newLineRegexp *regexp.Regexp
 var newLineOnce sync.Once
 
-// fixNewLines will change various newlines combinations to \r\n
+// fixNewLines will change various newlines combinations to \n
 func (exp *Expect) fixNewLines() {
 	newLineOnce.Do(func() { newLineRegexp = regexp.MustCompile("\r\n") })
 
@@ -256,45 +242,49 @@ func (exp *Expect) fixNewLines() {
 	exp.buffer = newLineRegexp.ReplaceAllLiteral(exp.buffer, []byte("\n"))
 }
 
-func (exp *Expect) send(arr []byte, masked bool) error {
-	for len(arr) > 0 {
-		if n, err := exp.pty.Write(arr); err == nil {
-			exp.eventbus.Emit(&ObsSend{arr[0:n], masked})
-			arr = arr[n:]
-		} else {
-			return err
-		}
+// Expect(s string) is equivalent to exp.ExpectRegexp(regexp.MustCompile(s))
+func (exp *Expect) Expect(expr string) (m Match, err error) {
+	return exp.ExpectRegexp(regexp.MustCompile(expr))
+}
+
+// Wait for EOF
+func (exp *Expect) ExpectEOF() error {
+	_, err := exp.Expect("$EOF")
+	return err
+}
+
+// Set up an I/O logger
+func (exp *Expect) SetLogger(logger Logger) {
+	if exp.log == nil {
+		panic("Expect object is uninitialized")
 	}
-	return nil
+	exp.log.SetLogger(logger)
 }
 
 func (exp *Expect) startReader() {
-	queueInput := make(chan readEvent)
+	bufferInput := make(chan readEvent)
 
-	// Dynamic buffer channel shim
+	// Buffer shim
 	go func() {
 		queue := make([]readEvent, 0)
 		done := false
 
-		// These are left as variables to handle the len(queue)=0 case.
-		var sendItem readEvent
-		var sendChan chan readEvent = nil
-
+		// Normal I/O loop
 		for !done {
+			var sendItem readEvent
+			var sendChan chan readEvent = nil
 
-			// Set up queue & send operation, otherwise let select block on nil-channel.
+			// Set up send operation if we have data to send
 			if len(queue) > 0 {
 				sendItem = queue[0]
 				sendChan = exp.readChan
-			} else {
-				sendChan = nil
 			}
 
-			// Wait for which ever I/O event happens first
+			// I/O
 			select {
 			case sendChan <- sendItem:
 				queue = queue[1:]
-			case read, ok := <-queueInput:
+			case read, ok := <-bufferInput:
 				if ok {
 					queue = append(queue, read)
 				} else {
@@ -303,13 +293,13 @@ func (exp *Expect) startReader() {
 			}
 		}
 
-		// Drain queue
+		// Drain buffer
 		for _, read := range queue {
-			// TODO - this hangs if the user exp.Close()s with data left to read.
-			// exp.Close() should signal to us that there's no more listeners left.
 			exp.readChan <- read
 		}
-		queue = nil
+
+		// Close output
+		close(exp.readChan)
 	}()
 
 	// Reader process
@@ -327,16 +317,14 @@ func (exp *Expect) startReader() {
 				err = io.EOF
 			}
 
-			queueInput <- readEvent{buf, err}
+			exp.log.RecvNet(buf)
+			bufferInput <- readEvent{buf, err}
 
 			if err != nil {
 				done = true
 			}
 		}
-		close(queueInput)
+		close(bufferInput)
 	}()
-}
 
-// TODO -- register finalizer, do we even need this?
-func (exp *Expect) finalize() {
 }

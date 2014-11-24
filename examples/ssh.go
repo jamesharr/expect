@@ -3,10 +3,11 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/jamesharr/expect"
 	"io"
 	"os"
 	"time"
+
+	"github.com/jamesharr/expect"
 )
 
 func main() {
@@ -22,7 +23,8 @@ func main() {
 	checkErr(err)
 
 	// Add logger
-	exp.AddObserver(expect.LoggingObserver("ssh.log"))
+	exp.SetLogger(expect.FileLogger("ssh.log"))
+	//	exp.SetLogger(expect.StderrLogger())
 
 	// Set a timeout
 	exp.SetTimeout(5 * time.Second)
@@ -65,12 +67,8 @@ func main() {
 	// opened.
 	exp.Close()
 
-	// Hack to let the various observers finish cleaning up before we exit.
-	// In a long running process, this should be a non-issue as long as exp.Close()
-	// is called.
-	time.Sleep(100 * time.Millisecond)
-
 	// You can use this to see that there's no extra expect processes running
+	// time.Sleep(100 * time.Millisecond)
 	// panic("DEBUG: Who's running")
 }
 
