@@ -61,7 +61,7 @@ func (logger *fileLogger) ExpectCall(t time.Time, r *regexp.Regexp) {
 }
 
 func (logger *fileLogger) ExpectReturn(t time.Time, m Match, e error) {
-	fmt.Fprintf(logger.w, "%s ExpectReturn %q %q\n", fmtTime(t), m, e)
+	fmt.Fprintf(logger.w, "%s ExpectReturn %q %v\n", fmtTime(t), m, e)
 }
 
 func (logger *fileLogger) Close(t time.Time) {
