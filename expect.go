@@ -56,6 +56,8 @@ func Spawn(name string, args ...string) (*Expect, error) {
 	}
 	killer := func() {
 		cmd.Process.Kill()
+		// the process is killed, however keeps a defunct process in memory
+		go cmd.Process.Wait()
 	}
 	return Create(pty, killer), nil
 }
