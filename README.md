@@ -1,3 +1,9 @@
+# STATUS
+
+This project has not been maintained for a while. If you're interested in helping maintain it, please write me.
+
+It's likely there are better and mroe direct options out there for doing SSH/Expect code in Go and that are more of the go idioms.
+
 # Expect for Go
 
 [![build status](https://secure.travis-ci.org/jamesharr/expect.png)](http://travis-ci.org/jamesharr/expect)
